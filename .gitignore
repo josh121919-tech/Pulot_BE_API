@@ -1,0 +1,6 @@
+# Real database credentials for a hosted server (see api/config.local.example.php)
+api/config.local.php
+
+# User-uploaded photos (keep the folder and its protection rules)
+uploads/*
+!uploads/.htaccess
