@@ -39,6 +39,19 @@ Default credentials are XAMPP's (`root`, no password).
    name, user and password. That file is git-ignored, so the password never reaches the repository.
 5. Make sure `uploads/` is writable by PHP, then open `https://<your-domain>/pulot-api/api/items.php`.
 
+### Live copy: alwaysdata
+
+The Pulot APK uses the copy running at `https://pulot.alwaysdata.net/api/items.php`
+(alwaysdata's free plan). It was set up like this:
+
+- Database `pulot_api` on `mysql-pulot.alwaysdata.net`, with `sql/lost_found_hosted.sql` imported.
+- `api/` and `uploads/` uploaded into `/home/pulot/www/` with WinSCP. alwaysdata's FTP only
+  accepts encrypted connections, so use **TLS/SSL Explicit encryption**.
+- The database login lives only on the server, never in this repository.
+
+Free hosts that put a browser check in front of the site (InfinityFree answers with an
+`aes.js` page) don't work for the app, because the app cannot pass that check.
+
 ## API
 
 | Method | URL                          | Body                                    | Result |
