@@ -13,6 +13,7 @@ pulot-api/
 ├── sql/lost_found.sql              creates the campus_lost_found database and items table (XAMPP)
 ├── sql/lost_found_hosted.sql       items table only, for shared hosting (no CREATE DATABASE)
 ├── sql/migrate_add_status.sql      adds the Resolved status to an older items table
+├── sql/migrate_add_found_notice.sql  adds the "I found this" notice to an older items table
 └── uploads/                        saved photos (.htaccess blocks scripts and listing)
 ```
 
@@ -61,6 +62,7 @@ Free hosts that put a browser check in front of the site (InfinityFree answers w
 | GET    | `/api/items.php?q=umbrella&category=Bags&status=open&from=2026-10-25T00:00:00%2B08:00` | – | 200, filters combined with AND (any can be left out) |
 | POST   | `/api/items.php`             | multipart: `title`, `description`, `type`, `category`, `latitude`, `longitude`, `contact_info`, optional `photo` file | 201 with the saved report and its `owner_token` |
 | PUT    | `/api/items.php?id=5`        | JSON: `{ "status": "resolved" or "open", "owner_token": "..." }` | 200 with the updated report; 403 for a wrong token |
+| PUT    | `/api/items.php?id=5`        | JSON: `{ "found_contact": "Phone: 0917..." }` (no token) | 200 with the report; 409 if it is not an open Lost report or already has a notice |
 
 GET filters: `type` (lost/found), `status` (open/resolved), `category`, `q` (keyword in the
 title or description, up to 100 characters), `from` / `to` (ISO 8601 date-times, `to` exclusive).

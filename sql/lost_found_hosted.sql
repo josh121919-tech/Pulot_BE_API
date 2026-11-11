@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS items (
   status ENUM('open', 'resolved') NOT NULL DEFAULT 'open',
   resolved_at TIMESTAMP NULL DEFAULT NULL,
   owner_token_hash CHAR(64) NULL,        -- SHA-256 of the secret only the reporter's phone keeps
+  found_contact VARCHAR(100) NULL,       -- set when someone says they found a Lost item
+  found_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_items_type_created (type, created_at),

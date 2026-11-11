@@ -11,6 +11,9 @@ declare(strict_types=1);
 //   PUT  /api/items.php?id=5         -> JSON { "status": "resolved"|"open", "owner_token": "..." }
 //                                       marks the report resolved (or reopens it); only the
 //                                       phone that created the report has the token.
+//   PUT  /api/items.php?id=5         -> JSON { "found_contact": "Phone: 0917..." } (no token):
+//                                       a finder tells the owner of an open Lost report how to
+//                                       reach them. One notice per report.
 // Every response is JSON shaped as { success, message?, data?, errors? }.
 
 require_once __DIR__ . '/config.php';
@@ -24,7 +27,7 @@ const SEARCH_MAX_LENGTH = 100;
 
 // Public columns only: owner_token_hash never leaves the server.
 const ITEM_COLUMNS = 'id, title, description, type, category, latitude, longitude, image_path, contact_info,
-                      status, resolved_at, created_at';
+                      status, resolved_at, found_contact, found_at, created_at';
 
 // Reads a JSON request body into an array (used when no photo is sent).
 function read_json_body(): array
@@ -139,6 +142,7 @@ function format_item(array $row): array
     // e.g. 2026-10-31T11:47:03+00:00, so the phone shows it in its own time zone.
     $row['created_at'] = utc_to_iso($row['created_at']);
     $row['resolved_at'] = $row['resolved_at'] === null ? null : utc_to_iso($row['resolved_at']);
+    $row['found_at'] = $row['found_at'] === null ? null : utc_to_iso($row['found_at']);
 
     return $row;
 }
@@ -223,6 +227,40 @@ function build_filters(): array
     return [$where ? 'WHERE ' . implode(' AND ', $where) : '', $params];
 }
 
+// A finder says they have an open Lost report's item. No token is needed: anyone who finds it
+// can say so. The first notice stays, so a later one cannot replace the real finder's contact.
+function record_found_notice(PDO $pdo, int $id, mixed $contact): void
+{
+    $contact = trim(is_string($contact) ? $contact : '');
+    if ($contact === '' || mb_strlen($contact) > 100) {
+        respond(422, ['success' => false, 'message' => 'Validation failed.', 'errors' => ['found_contact' => 'Add your contact number or Facebook name (100 characters or fewer).']]);
+    }
+
+    $item = find_item($pdo, $id);
+    if ($item === null) {
+        respond(404, ['success' => false, 'message' => 'Report not found.']);
+    }
+    if ($item['type'] !== 'lost' || $item['status'] !== 'open') {
+        respond(409, ['success' => false, 'message' => 'You can only answer an open Lost report.']);
+    }
+
+    // The WHERE clause makes the check and the update one step, so two finders at once cannot both win.
+    $stmt = $pdo->prepare(
+        'UPDATE items SET found_contact = :contact, found_at = CURRENT_TIMESTAMP
+         WHERE id = :id AND found_at IS NULL'
+    );
+    $stmt->execute(['contact' => $contact, 'id' => $id]);
+    if ($stmt->rowCount() === 0) {
+        respond(409, ['success' => false, 'message' => 'Someone has already told the owner they found this.']);
+    }
+
+    respond(200, [
+        'success' => true,
+        'message' => 'Sent. The owner gets an alert in PickApp.',
+        'data' => format_item(find_item($pdo, $id)),
+    ]);
+}
+
 function find_item(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare('SELECT ' . ITEM_COLUMNS . ' FROM items WHERE id = :id');
@@ -284,6 +322,9 @@ try {
             }
 
             $input = read_json_body();
+            if (array_key_exists('found_contact', $input)) {
+                record_found_notice($pdo, $id, $input['found_contact']);
+            }
             $status = $input['status'] ?? '';
             $token = (string)($input['owner_token'] ?? '');
             if (!in_array($status, ITEM_STATUSES, true)) {
