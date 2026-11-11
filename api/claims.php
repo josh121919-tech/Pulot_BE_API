@@ -1,16 +1,6 @@
 <?php
 declare(strict_types=1);
 
-// PickApp claims: "This is mine" on a Found report.
-//   POST /api/claims.php?item_id=5   -> JSON { "contact": "Phone: 0917...", "proof": "..." } (no token):
-//                                       someone who lost the item claims an open Found report.
-//                                       Many people can claim one report; the same contact
-//                                       can claim it only once.
-//   GET  /api/claims.php?item_id=5   -> header X-Owner-Token: <owner token>
-//                                       the person who posted the report reads its claims,
-//                                       newest first. The proof is private, so only they can.
-// Every response is JSON shaped as { success, message?, data?, errors? }.
-
 require_once __DIR__ . '/config.php';
 
 send_api_headers();
@@ -82,7 +72,6 @@ try {
                 $stmt = $pdo->prepare('INSERT INTO claims (item_id, contact, proof) VALUES (:item_id, :contact, :proof)');
                 $stmt->execute(['item_id' => $itemId, 'contact' => $contact, 'proof' => $proof]);
             } catch (PDOException $e) {
-                // 23000 = the unique key (item_id, contact): this contact already claimed it.
                 if ($e->getCode() === '23000') {
                     respond(409, ['success' => false, 'message' => 'You have already claimed this item.']);
                 }

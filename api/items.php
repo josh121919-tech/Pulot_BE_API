@@ -1,26 +1,6 @@
 <?php
 declare(strict_types=1);
 
-// PickApp (campus lost and found) REST endpoint.
-//   GET  /api/items.php              -> list every report, newest first
-//        optional filters, combinable: ?type=lost|found  &status=open|resolved
-//        &category=Keys  &q=keyword (title or description)  &from=/&to= (ISO 8601 date-times)
-//   POST /api/items.php              -> create a report (multipart/form-data with optional
-//                                       "photo" file, or a JSON body without a photo).
-//                                       The reply includes owner_token, shown only this once.
-//   PUT  /api/items.php?id=5         -> JSON { "status": "resolved"|"open", "owner_token": "..." }
-//                                       marks the report resolved (or reopens it); only the
-//                                       phone that created the report has the token.
-//   PUT  /api/items.php?id=5         -> JSON { "found_contact": "Phone: 0917..." } (no token):
-//                                       a finder tells the owner of an open Lost report how to
-//                                       reach them. One notice per report.
-//   POST /api/items.php?id=5         -> edit a report: the same fields as creating one, plus
-//                                       owner_token, an optional new "photo" and
-//                                       remove_photo=1 to drop the old one.
-//   DELETE /api/items.php?id=5       -> JSON { "owner_token": "..." } deletes the report and its photo.
-// Claims on Found reports ("This is mine") are in claims.php; each report here carries claim_count.
-// Every response is JSON shaped as { success, message?, data?, errors? }.
-
 require_once __DIR__ . '/config.php';
 
 send_api_headers();
@@ -30,14 +10,10 @@ const ITEM_STATUSES = ['open', 'resolved'];
 const ITEM_CATEGORIES = ['Electronics', 'ID/Cards', 'Keys', 'Bags', 'Personal Belongings', 'Others'];
 const SEARCH_MAX_LENGTH = 100;
 
-// Public columns only: owner_token_hash never leaves the server.
-// claim_count is only a number: the claims themselves (with the private proof) are read
-// from claims.php by the person who posted the report.
 const ITEM_COLUMNS = 'id, title, description, type, category, latitude, longitude, image_path, contact_info,
                       status, resolved_at, found_contact, found_at, created_at,
                       (SELECT COUNT(*) FROM claims WHERE claims.item_id = items.id) AS claim_count';
 
-// Checks every field and returns clean values, or stops with 422 and a per-field error list.
 function validate_item(array $input): array
 {
     $title = trim((string)($input['title'] ?? ''));
@@ -74,8 +50,6 @@ function validate_item(array $input): array
     ];
 }
 
-// Validates the uploaded "photo" and moves it into /uploads under a random name.
-// Returns the relative path to store in the database, or null when no photo was sent.
 function save_uploaded_photo(): ?string
 {
     $file = $_FILES['photo'] ?? null;
@@ -90,7 +64,6 @@ function save_uploaded_photo(): ?string
         respond(400, ['success' => false, 'message' => 'Photo upload failed. Please try again.']);
     }
 
-    // Trust the file's real contents, never the client-supplied name or MIME type.
     $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
     if (!isset(UPLOAD_ALLOWED_TYPES[$mime]) || getimagesize($file['tmp_name']) === false) {
         respond(415, ['success' => false, 'message' => 'Photo must be a JPEG, PNG or WebP image.']);
@@ -108,7 +81,6 @@ function save_uploaded_photo(): ?string
     return 'uploads/' . $fileName;
 }
 
-// Turns a stored relative path (uploads/x.jpg) into a full URL the app can load.
 function public_url(?string $path): ?string
 {
     if ($path === null || $path === '') {
@@ -118,13 +90,11 @@ function public_url(?string $path): ?string
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
     $scheme = $https ? 'https' : 'http';
-    // SCRIPT_NAME is /<project>/api/items.php, so two dirname() calls give the project root.
     $root = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME']))), '/');
 
     return $scheme . '://' . $_SERVER['HTTP_HOST'] . $root . '/' . $path;
 }
 
-// Casts database strings to proper JSON types and adds image_url.
 function format_item(array $row): array
 {
     $row['id'] = (int)$row['id'];
@@ -132,7 +102,6 @@ function format_item(array $row): array
     $row['longitude'] = (float)$row['longitude'];
     $row['claim_count'] = (int)$row['claim_count'];
     $row['image_url'] = public_url($row['image_path']);
-    // e.g. 2026-10-31T11:47:03+00:00, so the phone shows it in its own time zone.
     $row['created_at'] = utc_to_iso($row['created_at']);
     $row['resolved_at'] = $row['resolved_at'] === null ? null : utc_to_iso($row['resolved_at']);
     $row['found_at'] = $row['found_at'] === null ? null : utc_to_iso($row['found_at']);
@@ -140,8 +109,6 @@ function format_item(array $row): array
     return $row;
 }
 
-// Reads an ISO 8601 date-time filter (e.g. 2026-10-31T00:00:00+08:00) as a UTC timestamp string,
-// so "today" means the phone's own midnight whatever time zone the server is in.
 function parse_date_filter(string $name): ?string
 {
     $value = trim((string)($_GET[$name] ?? ''));
@@ -158,7 +125,6 @@ function parse_date_filter(string $name): ?string
     return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 }
 
-// Builds the WHERE clause for GET from the optional filters in the query string.
 function build_filters(): array
 {
     $where = [];
@@ -196,7 +162,6 @@ function build_filters(): array
         if (mb_strlen($search) > SEARCH_MAX_LENGTH) {
             respond(400, ['success' => false, 'message' => 'Search text must be ' . SEARCH_MAX_LENGTH . ' characters or fewer.']);
         }
-        // Escape LIKE wildcards so "100%" searches for the text, not "100 followed by anything".
         $where[] = '(title LIKE :q_title OR description LIKE :q_description)';
         $params['q_title'] = $params['q_description'] = '%' . addcslashes($search, '\\%_') . '%';
     }
@@ -215,8 +180,6 @@ function build_filters(): array
     return [$where ? 'WHERE ' . implode(' AND ', $where) : '', $params];
 }
 
-// A finder says they have an open Lost report's item. No token is needed: anyone who finds it
-// can say so. The first notice stays, so a later one cannot replace the real finder's contact.
 function record_found_notice(PDO $pdo, int $id, mixed $contact): void
 {
     $contact = trim(is_string($contact) ? $contact : '');
@@ -232,7 +195,6 @@ function record_found_notice(PDO $pdo, int $id, mixed $contact): void
         respond(409, ['success' => false, 'message' => 'You can only answer an open Lost report.']);
     }
 
-    // The WHERE clause makes the check and the update one step, so two finders at once cannot both win.
     $stmt = $pdo->prepare(
         'UPDATE items SET found_contact = :contact, found_at = CURRENT_TIMESTAMP
          WHERE id = :id AND found_at IS NULL'
@@ -249,7 +211,6 @@ function record_found_notice(PDO $pdo, int $id, mixed $contact): void
     ]);
 }
 
-// Reads ?id= from the URL, or stops with 400.
 function read_id(): int
 {
     $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -260,7 +221,6 @@ function read_id(): int
     return $id;
 }
 
-// Removes a stored photo file (uploads/x.jpg) if it is still there.
 function delete_photo(?string $path): void
 {
     if ($path !== null && $path !== '' && is_file(__DIR__ . '/../' . $path)) {
@@ -291,7 +251,6 @@ try {
             respond(200, ['success' => true, 'data' => array_map('format_item', $stmt->fetchAll())]);
 
         case 'POST':
-            // If the body was bigger than PHP's post_max_size, PHP silently drops every field.
             $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
             if ($contentLength > 0 && empty($_POST) && empty($_FILES) && str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data')) {
                 respond(413, ['success' => false, 'message' => 'The upload is too large for the server.']);
@@ -300,8 +259,6 @@ try {
             $isJson = str_contains($_SERVER['CONTENT_TYPE'] ?? '', 'application/json');
             $input = $isJson ? read_json_body() : $_POST;
 
-            // POST ?id=5 edits an existing report. (PHP reads multipart bodies only for POST,
-            // so editing with a new photo has to be a POST, not a PUT.)
             if (isset($_GET['id'])) {
                 $id = read_id();
                 $old = require_owner($pdo, $id, (string)($input['owner_token'] ?? ''), 'edit');
@@ -317,7 +274,6 @@ try {
                      WHERE id = :id'
                 );
                 $stmt->execute($item);
-                // The old photo goes only after the database has the new path.
                 if ($item['image_path'] !== $old['image_path']) {
                     delete_photo($old['image_path']);
                 }
@@ -330,8 +286,6 @@ try {
             $savedPhoto = $isJson ? null : save_uploaded_photo();
             $item['image_path'] = $savedPhoto;
 
-            // A random secret for the reporter's phone; the database keeps only its hash,
-            // so even someone who reads the table cannot resolve other people's reports.
             $ownerToken = bin2hex(random_bytes(32));
             $item['owner_token_hash'] = hash('sha256', $ownerToken);
 
@@ -382,7 +336,6 @@ try {
             $id = read_id();
             $old = require_owner($pdo, $id, (string)(read_json_body()['owner_token'] ?? ''), 'delete');
 
-            // Its claims go too (the foreign key also does this).
             $pdo->prepare('DELETE FROM claims WHERE item_id = :id')->execute(['id' => $id]);
             $stmt = $pdo->prepare('DELETE FROM items WHERE id = :id');
             $stmt->execute(['id' => $id]);
@@ -395,7 +348,6 @@ try {
             respond(405, ['success' => false, 'message' => 'Method not allowed.']);
     }
 } catch (Throwable $e) {
-    // Don't leave an orphan photo behind if the database insert failed.
     if ($savedPhoto !== null && is_file(__DIR__ . '/../' . $savedPhoto)) {
         unlink(__DIR__ . '/../' . $savedPhoto);
     }
