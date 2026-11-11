@@ -1,6 +1,6 @@
-# Pulot API
+# PickApp API
 
-The backend for [Pulot](https://github.com/josh121919-tech/Pulot), a campus lost and found app.
+The backend for [PickApp](https://github.com/josh121919-tech/Pulot) (repository name: Pulot), a campus lost and found app.
 A PHP 8 REST endpoint (PDO) with a MariaDB/MySQL database. The Ionic app calls it with
 Angular `HttpClient`.
 
@@ -41,7 +41,7 @@ Default credentials are XAMPP's (`root`, no password).
 
 ### Live copy: alwaysdata
 
-The Pulot APK uses the copy running at `https://pulot.alwaysdata.net/api/items.php`
+The PickApp APK uses the copy running at `https://pulot.alwaysdata.net/api/items.php`
 (alwaysdata's free plan). It was set up like this:
 
 - Database `pulot_api` on `mysql-pulot.alwaysdata.net`, with `sql/lost_found_hosted.sql` imported.

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-// Pulot (campus lost and found) REST endpoint.
+// PickApp (campus lost and found) REST endpoint.
 //   GET  /api/items.php              -> list every report, newest first
 //        optional filters, combinable: ?type=lost|found  &status=open|resolved
 //        &category=Keys  &q=keyword (title or description)  &from=/&to= (ISO 8601 date-times)
