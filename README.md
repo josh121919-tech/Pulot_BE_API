@@ -9,7 +9,7 @@ pulot-api/
 ├── api/
 │   ├── config.php                  DB connection (PDO), CORS, JSON helper
 │   ├── config.local.example.php    template for real credentials on a server
-│   └── items.php                   GET list / POST report (+ photo upload) / PUT status
+│   └── items.php                   GET list / POST report (+ photo) / edit / DELETE / PUT status
 ├── sql/lost_found.sql              creates the campus_lost_found database and items table (XAMPP)
 ├── sql/lost_found_hosted.sql       items table only, for shared hosting (no CREATE DATABASE)
 ├── sql/migrate_add_status.sql      adds the Resolved status to an older items table
@@ -63,6 +63,8 @@ Free hosts that put a browser check in front of the site (InfinityFree answers w
 | POST   | `/api/items.php`             | multipart: `title`, `description`, `type`, `category`, `latitude`, `longitude`, `contact_info`, optional `photo` file | 201 with the saved report and its `owner_token` |
 | PUT    | `/api/items.php?id=5`        | JSON: `{ "status": "resolved" or "open", "owner_token": "..." }` | 200 with the updated report; 403 for a wrong token |
 | PUT    | `/api/items.php?id=5`        | JSON: `{ "found_contact": "Phone: 0917..." }` (no token) | 200 with the report; 409 if it is not an open Lost report or already has a notice |
+| POST   | `/api/items.php?id=5`        | Same fields as creating a report, plus `owner_token`, an optional new `photo` and `remove_photo=1` | 200 "Report updated." with the report; 403 for a wrong token |
+| DELETE | `/api/items.php?id=5`        | JSON: `{ "owner_token": "..." }` | 200 "Report deleted." (the photo file is removed too); 403 for a wrong token |
 
 GET filters: `type` (lost/found), `status` (open/resolved), `category`, `q` (keyword in the
 title or description, up to 100 characters), `from` / `to` (ISO 8601 date-times, `to` exclusive).
@@ -71,9 +73,9 @@ Errors come back as `{ "success": false, "message": "...", "errors": { field: ".
 with status 400, 403, 404, 405, 413 (photo over 5 MB), 415 (not a JPEG/PNG/WebP), 422 (validation) or 500.
 Categories: Electronics, ID/Cards, Keys, Bags, Personal Belongings, Others.
 
-**Who can resolve a report.** There is no login, so POST creates a random `owner_token`,
+**Who can change a report.** There is no login, so POST creates a random `owner_token`,
 returns it once, and stores only its SHA-256 hash. The app keeps the token on the phone that
-submitted the report, so only that phone can mark it resolved.
+submitted the report, so only that phone can mark it resolved, edit it or delete it.
 
 ## Security notes
 

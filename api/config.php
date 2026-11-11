@@ -58,7 +58,7 @@ function send_api_headers(): void
         header('Vary: Origin');
     }
 
-    header('Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
     header('Content-Type: application/json; charset=utf-8');
 

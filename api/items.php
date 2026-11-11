@@ -14,6 +14,10 @@ declare(strict_types=1);
 //   PUT  /api/items.php?id=5         -> JSON { "found_contact": "Phone: 0917..." } (no token):
 //                                       a finder tells the owner of an open Lost report how to
 //                                       reach them. One notice per report.
+//   POST /api/items.php?id=5         -> edit a report: the same fields as creating one, plus
+//                                       owner_token, an optional new "photo" and
+//                                       remove_photo=1 to drop the old one.
+//   DELETE /api/items.php?id=5       -> JSON { "owner_token": "..." } deletes the report and its photo.
 // Every response is JSON shaped as { success, message?, data?, errors? }.
 
 require_once __DIR__ . '/config.php';
@@ -261,6 +265,42 @@ function record_found_notice(PDO $pdo, int $id, mixed $contact): void
     ]);
 }
 
+// Reads ?id= from the URL, or stops with 400.
+function read_id(): int
+{
+    $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($id === false) {
+        respond(400, ['success' => false, 'message' => 'Add the report id to the URL, e.g. items.php?id=5.']);
+    }
+
+    return $id;
+}
+
+// Returns the report when $token is its owner token; otherwise stops with 404 or 403.
+function require_owner(PDO $pdo, int $id, string $token, string $action): array
+{
+    $stmt = $pdo->prepare('SELECT image_path, owner_token_hash FROM items WHERE id = :id');
+    $stmt->execute(['id' => $id]);
+    $row = $stmt->fetch();
+    if ($row === false) {
+        respond(404, ['success' => false, 'message' => 'Report not found.']);
+    }
+    // hash_equals compares in constant time, so the hash cannot be guessed byte by byte.
+    if ($row['owner_token_hash'] === null || $token === '' || !hash_equals($row['owner_token_hash'], hash('sha256', $token))) {
+        respond(403, ['success' => false, 'message' => "Only the person who submitted this report can $action it."]);
+    }
+
+    return $row;
+}
+
+// Removes a stored photo file (uploads/x.jpg) if it is still there.
+function delete_photo(?string $path): void
+{
+    if ($path !== null && $path !== '' && is_file(__DIR__ . '/../' . $path)) {
+        unlink(__DIR__ . '/../' . $path);
+    }
+}
+
 function find_item(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare('SELECT ' . ITEM_COLUMNS . ' FROM items WHERE id = :id');
@@ -291,7 +331,35 @@ try {
             }
 
             $isJson = str_contains($_SERVER['CONTENT_TYPE'] ?? '', 'application/json');
-            $item = validate_item($isJson ? read_json_body() : $_POST);
+            $input = $isJson ? read_json_body() : $_POST;
+
+            // POST ?id=5 edits an existing report. (PHP reads multipart bodies only for POST,
+            // so editing with a new photo has to be a POST, not a PUT.)
+            if (isset($_GET['id'])) {
+                $id = read_id();
+                $old = require_owner($pdo, $id, (string)($input['owner_token'] ?? ''), 'edit');
+                $item = validate_item($input);
+                $savedPhoto = $isJson ? null : save_uploaded_photo();
+                $removePhoto = ($input['remove_photo'] ?? '') === '1';
+                $item['image_path'] = $savedPhoto ?? ($removePhoto ? null : $old['image_path']);
+                $item['id'] = $id;
+
+                $stmt = $pdo->prepare(
+                    'UPDATE items SET title = :title, description = :description, type = :type, category = :category,
+                            latitude = :latitude, longitude = :longitude, image_path = :image_path, contact_info = :contact_info
+                     WHERE id = :id'
+                );
+                $stmt->execute($item);
+                // The old photo goes only after the database has the new path.
+                if ($item['image_path'] !== $old['image_path']) {
+                    delete_photo($old['image_path']);
+                }
+                $savedPhoto = null;
+
+                respond(200, ['success' => true, 'message' => 'Report updated.', 'data' => format_item(find_item($pdo, $id))]);
+            }
+
+            $item = validate_item($input);
             $savedPhoto = $isJson ? null : save_uploaded_photo();
             $item['image_path'] = $savedPhoto;
 
@@ -316,10 +384,7 @@ try {
             ]);
 
         case 'PUT':
-            $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-            if ($id === false) {
-                respond(400, ['success' => false, 'message' => 'Add the report id to the URL, e.g. items.php?id=5.']);
-            }
+            $id = read_id();
 
             $input = read_json_body();
             if (array_key_exists('found_contact', $input)) {
@@ -331,16 +396,7 @@ try {
                 respond(422, ['success' => false, 'message' => 'Validation failed.', 'errors' => ['status' => 'Status must be "open" or "resolved".']]);
             }
 
-            $stmt = $pdo->prepare('SELECT owner_token_hash FROM items WHERE id = :id');
-            $stmt->execute(['id' => $id]);
-            $storedHash = $stmt->fetchColumn();
-            if ($storedHash === false) {
-                respond(404, ['success' => false, 'message' => 'Report not found.']);
-            }
-            // hash_equals compares in constant time, so the hash cannot be guessed byte by byte.
-            if ($storedHash === null || $token === '' || !hash_equals($storedHash, hash('sha256', $token))) {
-                respond(403, ['success' => false, 'message' => 'Only the person who submitted this report can change its status.']);
-            }
+            require_owner($pdo, $id, $token, 'change');
 
             $stmt = $pdo->prepare(
                 "UPDATE items
@@ -355,8 +411,18 @@ try {
                 'data' => format_item(find_item($pdo, $id)),
             ]);
 
+        case 'DELETE':
+            $id = read_id();
+            $old = require_owner($pdo, $id, (string)(read_json_body()['owner_token'] ?? ''), 'delete');
+
+            $stmt = $pdo->prepare('DELETE FROM items WHERE id = :id');
+            $stmt->execute(['id' => $id]);
+            delete_photo($old['image_path']);
+
+            respond(200, ['success' => true, 'message' => 'Report deleted.']);
+
         default:
-            header('Allow: GET, POST, PUT, OPTIONS');
+            header('Allow: GET, POST, PUT, DELETE, OPTIONS');
             respond(405, ['success' => false, 'message' => 'Method not allowed.']);
     }
 } catch (Throwable $e) {
