@@ -23,3 +23,15 @@ CREATE TABLE IF NOT EXISTS items (
   KEY idx_items_type_created (type, created_at),
   KEY idx_items_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Claims on Found reports ("This is mine"). Many per report; one per contact per report.
+CREATE TABLE IF NOT EXISTS claims (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id INT UNSIGNED NOT NULL,
+  contact VARCHAR(100) NOT NULL,         -- "Phone: 0917..." or "Facebook: Juan Dela Cruz"
+  proof VARCHAR(500) NOT NULL,           -- a detail only the owner would know; only the poster sees it
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_claims_item_contact (item_id, contact),
+  CONSTRAINT fk_claims_item FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

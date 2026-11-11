@@ -18,6 +18,7 @@ declare(strict_types=1);
 //                                       owner_token, an optional new "photo" and
 //                                       remove_photo=1 to drop the old one.
 //   DELETE /api/items.php?id=5       -> JSON { "owner_token": "..." } deletes the report and its photo.
+// Claims on Found reports ("This is mine") are in claims.php; each report here carries claim_count.
 // Every response is JSON shaped as { success, message?, data?, errors? }.
 
 require_once __DIR__ . '/config.php';
@@ -30,24 +31,11 @@ const ITEM_CATEGORIES = ['Electronics', 'ID/Cards', 'Keys', 'Bags', 'Personal Be
 const SEARCH_MAX_LENGTH = 100;
 
 // Public columns only: owner_token_hash never leaves the server.
+// claim_count is only a number: the claims themselves (with the private proof) are read
+// from claims.php by the person who posted the report.
 const ITEM_COLUMNS = 'id, title, description, type, category, latitude, longitude, image_path, contact_info,
-                      status, resolved_at, found_contact, found_at, created_at';
-
-// Reads a JSON request body into an array (used when no photo is sent).
-function read_json_body(): array
-{
-    $raw = file_get_contents('php://input');
-    if ($raw === false || trim($raw) === '') {
-        respond(400, ['success' => false, 'message' => 'Request body is required.']);
-    }
-
-    $decoded = json_decode($raw, true);
-    if (!is_array($decoded)) {
-        respond(400, ['success' => false, 'message' => 'Invalid JSON request body.']);
-    }
-
-    return $decoded;
-}
+                      status, resolved_at, found_contact, found_at, created_at,
+                      (SELECT COUNT(*) FROM claims WHERE claims.item_id = items.id) AS claim_count';
 
 // Checks every field and returns clean values, or stops with 422 and a per-field error list.
 function validate_item(array $input): array
@@ -142,6 +130,7 @@ function format_item(array $row): array
     $row['id'] = (int)$row['id'];
     $row['latitude'] = (float)$row['latitude'];
     $row['longitude'] = (float)$row['longitude'];
+    $row['claim_count'] = (int)$row['claim_count'];
     $row['image_url'] = public_url($row['image_path']);
     // e.g. 2026-10-31T11:47:03+00:00, so the phone shows it in its own time zone.
     $row['created_at'] = utc_to_iso($row['created_at']);
@@ -149,11 +138,6 @@ function format_item(array $row): array
     $row['found_at'] = $row['found_at'] === null ? null : utc_to_iso($row['found_at']);
 
     return $row;
-}
-
-function utc_to_iso(string $timestamp): string
-{
-    return (new DateTimeImmutable($timestamp, new DateTimeZone('UTC')))->format(DATE_ATOM);
 }
 
 // Reads an ISO 8601 date-time filter (e.g. 2026-10-31T00:00:00+08:00) as a UTC timestamp string,
@@ -274,23 +258,6 @@ function read_id(): int
     }
 
     return $id;
-}
-
-// Returns the report when $token is its owner token; otherwise stops with 404 or 403.
-function require_owner(PDO $pdo, int $id, string $token, string $action): array
-{
-    $stmt = $pdo->prepare('SELECT image_path, owner_token_hash FROM items WHERE id = :id');
-    $stmt->execute(['id' => $id]);
-    $row = $stmt->fetch();
-    if ($row === false) {
-        respond(404, ['success' => false, 'message' => 'Report not found.']);
-    }
-    // hash_equals compares in constant time, so the hash cannot be guessed byte by byte.
-    if ($row['owner_token_hash'] === null || $token === '' || !hash_equals($row['owner_token_hash'], hash('sha256', $token))) {
-        respond(403, ['success' => false, 'message' => "Only the person who submitted this report can $action it."]);
-    }
-
-    return $row;
 }
 
 // Removes a stored photo file (uploads/x.jpg) if it is still there.
@@ -415,6 +382,8 @@ try {
             $id = read_id();
             $old = require_owner($pdo, $id, (string)(read_json_body()['owner_token'] ?? ''), 'delete');
 
+            // Its claims go too (the foreign key also does this).
+            $pdo->prepare('DELETE FROM claims WHERE item_id = :id')->execute(['id' => $id]);
             $stmt = $pdo->prepare('DELETE FROM items WHERE id = :id');
             $stmt->execute(['id' => $id]);
             delete_photo($old['image_path']);

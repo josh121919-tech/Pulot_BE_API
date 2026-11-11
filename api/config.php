@@ -59,7 +59,7 @@ function send_api_headers(): void
     }
 
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Owner-Token');
     header('Content-Type: application/json; charset=utf-8');
 
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -73,4 +73,43 @@ function respond(int $status, array $payload): void
     http_response_code($status);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+// Reads a JSON request body into an array (used when no photo is sent).
+function read_json_body(): array
+{
+    $raw = file_get_contents('php://input');
+    if ($raw === false || trim($raw) === '') {
+        respond(400, ['success' => false, 'message' => 'Request body is required.']);
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        respond(400, ['success' => false, 'message' => 'Invalid JSON request body.']);
+    }
+
+    return $decoded;
+}
+
+// A UTC TIMESTAMP from MariaDB as ISO 8601, e.g. 2026-10-31T11:47:03+00:00.
+function utc_to_iso(string $timestamp): string
+{
+    return (new DateTimeImmutable($timestamp, new DateTimeZone('UTC')))->format(DATE_ATOM);
+}
+
+// Returns the report when $token is its owner token; otherwise stops with 404 or 403.
+function require_owner(PDO $pdo, int $id, string $token, string $action): array
+{
+    $stmt = $pdo->prepare('SELECT image_path, owner_token_hash FROM items WHERE id = :id');
+    $stmt->execute(['id' => $id]);
+    $row = $stmt->fetch();
+    if ($row === false) {
+        respond(404, ['success' => false, 'message' => 'Report not found.']);
+    }
+    // hash_equals compares in constant time, so the hash cannot be guessed byte by byte.
+    if ($row['owner_token_hash'] === null || $token === '' || !hash_equals($row['owner_token_hash'], hash('sha256', $token))) {
+        respond(403, ['success' => false, 'message' => "Only the person who submitted this report can $action it."]);
+    }
+
+    return $row;
 }
